@@ -26,6 +26,7 @@ flags.DEFINE_integer("embedding_size", 48, "Size of word embedding layer.")
 flags.DEFINE_boolean("load", True, "Load previous checkpoint?")
 flags.DEFINE_boolean("train", True, "Training model.")
 flags.DEFINE_boolean("inference", True, "Inference.")
+flags.DEFINE_boolean("visualize", True, "Visualize embeddings.")
 flags.DEFINE_integer("n_epochs", 50, "Number of training epochs.")
 flags.DEFINE_string("model_path", "model.ckpt", "Model path.")
 
@@ -184,39 +185,27 @@ class Model():
                     print("Finished.")
                     break
 
-# ### Training
-if FLAGS.train == True:
-    #### Data object initiazation
-    data_obj = Data_obj(batch_size=FLAGS.batch_size,clean_data=txt8_data_clean)
-    train_obj = Model(
-            model_path=FLAGS.model_path,
-            data_obj=data_obj,
-            embedding_size=FLAGS.embedding_size,
-            lr=FLAGS.learning_rate,
-            n_epochs=FLAGS.n_epochs)
-    train_obj.train(load=FLAGS.load)
-
-
-# ### Top words and their predicted counterparts
-def inf():
-    if FLAGS.inference == True:
-        print("Inference")
+    def inference_examples(self):
+        self.graph()
         with tf.Session() as sess:
-            saver.restore(sess,model_path)
-            learnt_embeddings = embeddings.eval()
-            top_n_words = 5 
+            saver.restore(sess,self.model_path)
 
             for word in ["education","port","america","three","philosophy","social","state"]:
-                word_no = data_obj.Tokenizer.word_index[word]
-                feed_dict={train_inputs:np.array([word_no])}
-                word_embed, word_pred = sess.run([embed,soft_max],feed_dict)
+                word_no = self.data_obj.Tokenizer.word_index[word]
+                feed_dict={self.train_inputs:np.array([word_no])}
+                word_embed, word_pred = sess.run([self.embed,self.soft_max],feed_dict)
                 word_pred = word_pred.squeeze()
                 top_n_args = word_pred.argsort()[-top_n_words:]
                 print("Word = {0}".format(word))
-                print(data_obj.inverse_tokenizer_sentence(top_n_args))
+                print(self.data_obj.inverse_tokenizer_sentence(top_n_args))
                 print("\n")
-            
-        # # Visulization
+
+    def visualize(self): 
+        self.graph()
+        with tf.Session() as sess:
+            saver.restore(sess,self.model_path)
+            learnt_embeddings = self.embeddings.eval()
+
         for perplexity in range(5,20,2):
             n_words_display = 80 # look at first n_words_display embedded
             tsne = TSNE(n_components=2,perplexity=perplexity)
@@ -237,5 +226,29 @@ def inf():
                     bbox=dict(boxstyle='round,pad=0.5', fc='yellow', alpha=0.5),
                     arrowprops=dict(arrowstyle = '->', connectionstyle='arc3,rad=0'))
 
-            plt.savefig("visualization_perplex_{0}.png".format(perplexity))
+            save_path = "visualization_perplex_{0}.png".format(perplexity)
+            plt.savefig(save_path)
+            print("Saved {0}.".format(save_path))
             plt.close()
+
+#### Data object initiazation
+if __name__ == "__main__":
+    data_obj = Data_obj(batch_size=FLAGS.batch_size,clean_data=txt8_data_clean)
+    model_obj = Model(
+            model_path=FLAGS.model_path,
+            data_obj=data_obj,
+            embedding_size=FLAGS.embedding_size,
+            lr=FLAGS.learning_rate,
+            n_epochs=FLAGS.n_epochs)
+    if FLAGS.train == True:
+        model_obj.train(load=FLAGS.load)
+    if FLAGS.inference == True:
+        model_obj.inference()
+    if FLAGS.visualize== True:
+        model_obj.visualize()
+
+
+# ### Top words and their predicted counterparts
+
+            
+
