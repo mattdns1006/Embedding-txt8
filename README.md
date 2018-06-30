@@ -3,4 +3,4 @@ Embedding visualisation for the [english Wikipedia dump dataset](http://mattmaho
 
 Run script to generate a cool visulization of learnt word embeddings using a word2vec framework. Dimensionality reduction is performed using t-SNE.
 
- ![alt text](https://github.com/mattdns100689/Embedding-txt8/blob/master/visualization.png)
+ ![alt text](https://github.com/mattdns100689/Embedding-txt8/blob/master/visualization_perplex_5.png)
