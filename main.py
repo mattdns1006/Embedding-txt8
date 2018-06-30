@@ -26,9 +26,9 @@ flags.DEFINE_integer("embedding_size", 48, "Size of word embedding layer.")
 flags.DEFINE_boolean("load", True, "Load previous checkpoint?")
 flags.DEFINE_boolean("train", True, "Training model.")
 flags.DEFINE_boolean("inference", True, "Inference.")
-flags.DEFINE_integer("epochs", 50, "Number of training epochs.")
+flags.DEFINE_integer("n_epochs", 50, "Number of training epochs.")
+flags.DEFINE_string("model_path", "model.ckpt", "Model path.")
 
-model_path = os.path.join(os.getcwd(),'model.ckpt')
 
 # # Preprocessing 
 
@@ -108,113 +108,134 @@ else:
         txt8_data_clean = pickle.load(fp)
 print("Length of (cleaned) dataset in words = {0}.".format(len(txt8_data_clean[0])))
 
-#### Data object initiazation
-data_obj = Data_obj(batch_size=FLAGS.batch_size,clean_data=txt8_data_clean)
-generate_batch = data_obj.generator()
+
 
 # # Model
-#### Graph
-vocabulary_size = data_obj.vocab_size
-train_inputs = tf.placeholder(tf.int32, shape=[None])
-train_context = tf.placeholder(tf.int32, shape=[None, 1])
-embeddings = tf.Variable(
-    tf.random_uniform([vocabulary_size, FLAGS.embedding_size], -1.0, 1.0))
-embed = tf.nn.embedding_lookup(embeddings, train_inputs)
+class Model():
+    def __init__(self,model_path,data_obj,embedding_size,lr,n_epochs):
 
-#NCE Loss
-nce_weights = tf.Variable(
-        tf.truncated_normal([vocabulary_size, FLAGS.embedding_size],
-                            stddev=1.0 / np.sqrt(FLAGS.embedding_size)))
-nce_biases = tf.Variable(tf.zeros([vocabulary_size]))
-hidden_out = tf.matmul(embed, tf.transpose(nce_weights)) + nce_biases
-soft_max = tf.nn.softmax(hidden_out)
-loss = tf.reduce_mean(
-        tf.nn.nce_loss(weights=nce_weights,
-                       biases=nce_biases,
-                       labels=train_context,
-                       inputs=embed,
-                       num_sampled=1,
-                       num_classes=vocabulary_size))
-# Optimization 
-learning_rate = tf.placeholder(tf.float32)
-optimizer = tf.train.GradientDescentOptimizer(learning_rate).minimize(loss)
-saver = tf.train.Saver()
+        self.data_obj = data_obj
+        self.model_path = os.path.join(os.getcwd(),model_path)
+        self.vocabulary_size = data_obj.vocab_size
+        self.embedding_size = embedding_size
+        self.lr = lr
+        self.n_epochs = n_epochs
 
-#cosine similarity
-embedding_norm=tf.nn.l2_normalize(embeddings,axis=1)
-similarity = tf.matmul(embedding_norm, tf.transpose(embedding_norm))
+    def graph(self):
+        #### Graph
+        self.train_inputs = tf.placeholder(tf.int32, shape=[None])
+        self.train_context = tf.placeholder(tf.int32, shape=[None, 1])
+        self.embeddings = tf.Variable(
+            tf.random_uniform([self.vocabulary_size, self.embedding_size], -1.0, 1.0))
+        self.embed = tf.nn.embedding_lookup(self.embeddings, self.train_inputs)
+
+        #NCE Loss
+        nce_weights = tf.Variable(
+                tf.truncated_normal([self.vocabulary_size, self.embedding_size],
+                                    stddev=1.0 / np.sqrt(self.embedding_size)))
+        nce_biases = tf.Variable(tf.zeros([self.vocabulary_size]))
+        hidden_out = tf.matmul(self.embed, tf.transpose(nce_weights)) + nce_biases
+        self.soft_max = tf.nn.softmax(hidden_out)
+        self.loss = tf.reduce_mean(
+                tf.nn.nce_loss(weights=nce_weights,
+                               biases=nce_biases,
+                               labels=self.train_context,
+                               inputs=self.embed,
+                               num_sampled=1,
+                               num_classes=self.vocabulary_size))
+        # Optimization 
+        self.learning_rate = tf.placeholder(tf.float32)
+        self.optimizer = tf.train.GradientDescentOptimizer(self.learning_rate).minimize(self.loss)
+        self.saver = tf.train.Saver()
+
+        #cosine similarity
+        #embedding_norm=tf.nn.l2_normalize(embeddings,axis=1)
+        #similarity = tf.matmul(embedding_norm, tf.transpose(embedding_norm))
+
+    def train(self,load):
+        self.graph()
+        with tf.Session() as sess:
+            if load == True:
+                self.saver.restore(sess,self.model_path)
+                print("Restored {0}.".format(self.model_path))
+            else:
+                init = tf.global_variables_initializer()
+                sess.run(init)
+            self.embeddings_before = self.embeddings.eval()
+            cur_losses = []
+            batch_generater = self.data_obj.generator()
+            print("Training")
+            while True:
+                data = next(batch_generater)
+                feed_dict = {self.train_inputs: data[:,0],self.train_context:data[:,[1]],self.learning_rate:self.lr}
+                _, cur_loss = sess.run([self.optimizer, self.loss], feed_dict=feed_dict)
+                cur_losses.append(cur_loss)
+                if self.data_obj.total_examples_seen % 10000 == 0 and self.data_obj.total_examples_seen > 0:
+                    print("{0} seen with running loss of {1:.3f}. Current epoch = {2}. Current LR = {3:.3f}".format(
+                        self.data_obj.total_examples_seen,
+                        np.mean(cur_losses),
+                        self.data_obj.epoch,
+                        self.lr))
+                    cur_losses = []
+                    self.lr/= 1.01
+                    self.saver.save(sess,self.model_path)
+                    print("Saved in {0}.".format(self.model_path))
+                if self.data_obj.epoch == self.n_epochs:
+                    print("Finished.")
+                    break
 
 # ### Training
 if FLAGS.train == True:
-    print("Training")
-    with tf.Session() as sess:
-        if FLAGS.load == True:
-            saver.restore(sess,model_path)
-            print("Restored {0}.".format(model_path))
-        else:
-            init = tf.global_variables_initializer()
-            sess.run(init)
-        embeddings_before = embeddings.eval()
-
-        cur_losses = []
-
-        while True:
-            data = next(generate_batch)
-            feed_dict = {train_inputs: data[:,0],train_context:data[:,[1]],learning_rate:FLAGS.learning_rate}
-            _, cur_loss = sess.run([optimizer, loss], feed_dict=feed_dict)
-            cur_losses.append(cur_loss)
-            if data_obj.total_examples_seen % 1000000 == 0 and data_obj.total_examples_seen > 0:
-                print("{0} seen with running loss of {1:.3f}. Current epoch = {2}. Current LR = {3:.3f}".format(
-                    data_obj.total_examples_seen,
-                    np.mean(cur_losses),
-                    data_obj.epoch,
-                    FLAGS.learning_rate))
-                cur_losses = []
-                FLAGS.learning_rate /= 1.01
-                save_path = saver.save(sess,model_path)
-            if data_obj.epoch == FLAGS.epochs:
-                print("Finished.")
-                break
+    #### Data object initiazation
+    data_obj = Data_obj(batch_size=FLAGS.batch_size,clean_data=txt8_data_clean)
+    train_obj = Model(
+            model_path=FLAGS.model_path,
+            data_obj=data_obj,
+            embedding_size=FLAGS.embedding_size,
+            lr=FLAGS.learning_rate,
+            n_epochs=FLAGS.n_epochs)
+    train_obj.train(load=FLAGS.load)
 
 
 # ### Top words and their predicted counterparts
-if FLAGS.inference == True:
-    print("Inference")
-    with tf.Session() as sess:
-        saver.restore(sess,model_path)
-        learnt_embeddings = embeddings.eval()
-        top_n_words = 5 
+def inf():
+    if FLAGS.inference == True:
+        print("Inference")
+        with tf.Session() as sess:
+            saver.restore(sess,model_path)
+            learnt_embeddings = embeddings.eval()
+            top_n_words = 5 
 
-        for word in ["education","port","america","three","philosophy","social","state"]:
-            word_no = data_obj.Tokenizer.word_index[word]
-            feed_dict={train_inputs:np.array([word_no])}
-            word_embed, word_pred = sess.run([embed,soft_max],feed_dict)
-            word_pred = word_pred.squeeze()
-            top_n_args = word_pred.argsort()[-top_n_words:]
-            print("Word = {0}".format(word))
-            print(data_obj.inverse_tokenizer_sentence(top_n_args))
-            print("\n")
-        
-    # # Visulization
-    for perplexity in range(5,20,2):
-        n_words_display = 80 # look at first n_words_display embedded
-        tsne = TSNE(n_components=2,perplexity=perplexity)
-        reduced_embeddings = tsne.fit_transform(learnt_embeddings[1:n_words_display+1]) #first embedding is meaningless (cant index it)
-        labels = [data_obj.inverse_tokenizer(word_no) for word_no in range(1,vocabulary_size)[:n_words_display]]
+            for word in ["education","port","america","three","philosophy","social","state"]:
+                word_no = data_obj.Tokenizer.word_index[word]
+                feed_dict={train_inputs:np.array([word_no])}
+                word_embed, word_pred = sess.run([embed,soft_max],feed_dict)
+                word_pred = word_pred.squeeze()
+                top_n_args = word_pred.argsort()[-top_n_words:]
+                print("Word = {0}".format(word))
+                print(data_obj.inverse_tokenizer_sentence(top_n_args))
+                print("\n")
+            
+        # # Visulization
+        for perplexity in range(5,20,2):
+            n_words_display = 80 # look at first n_words_display embedded
+            tsne = TSNE(n_components=2,perplexity=perplexity)
+            reduced_embeddings = tsne.fit_transform(learnt_embeddings[1:n_words_display+1]) #first embedding is meaningless (cant index it)
+            labels = [data_obj.inverse_tokenizer(word_no) for word_no in range(1,vocabulary_size)[:n_words_display]]
 
-        plt.figure(figsize=(25,25))
-        plt.subplots_adjust(bottom = 0.1)
-        plt.scatter(
-            reduced_embeddings[:, 0], reduced_embeddings[:, 1], marker='o',
-            cmap=plt.get_cmap('Spectral'))
+            plt.figure(figsize=(25,25))
+            plt.subplots_adjust(bottom = 0.1)
+            plt.scatter(
+                reduced_embeddings[:, 0], reduced_embeddings[:, 1], marker='o',
+                cmap=plt.get_cmap('Spectral'))
 
-        for label, x, y in zip(labels, reduced_embeddings[:, 0], reduced_embeddings[:, 1]):
-            plt.annotate(
-                label,
-                xy=(x, y), xytext=(-20, 20),
-                textcoords='offset points', ha='right', va='bottom',
-                bbox=dict(boxstyle='round,pad=0.5', fc='yellow', alpha=0.5),
-                arrowprops=dict(arrowstyle = '->', connectionstyle='arc3,rad=0'))
+            for label, x, y in zip(labels, reduced_embeddings[:, 0], reduced_embeddings[:, 1]):
+                plt.annotate(
+                    label,
+                    xy=(x, y), xytext=(-20, 20),
+                    textcoords='offset points', ha='right', va='bottom',
+                    bbox=dict(boxstyle='round,pad=0.5', fc='yellow', alpha=0.5),
+                    arrowprops=dict(arrowstyle = '->', connectionstyle='arc3,rad=0'))
 
-        plt.savefig("visualization_perplex_{0}.png".format(perplexity))
-        plt.close()
+            plt.savefig("visualization_perplex_{0}.png".format(perplexity))
+            plt.close()
