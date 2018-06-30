@@ -2,11 +2,10 @@ import tensorflow as tf
 import numpy as np
 import numpy.random as rng
 import pandas as pd
-import os, pdb, re, pdb
-import string
+import os, pdb, re, pdb, string, pickle
 import matplotlib
 import matplotlib.pyplot as plt
-import pickle
+matplotlib.use("Agg")
 
 #Preprocessing
 import nltk
@@ -18,12 +17,6 @@ from keras.preprocessing import sequence
 #Visualization
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
-
-#Display options
-float_formatter = lambda x: "%.2f" % x
-np.set_printoptions(linewidth=200,threshold=np.nan,formatter={'float_kind':float_formatter})
-pd.set_option("display.max_colwidth",200)
-pd.set_option("display.max_rows",200)
 
 flags = tf.app.flags
 FLAGS = flags.FLAGS
@@ -38,8 +31,6 @@ flags.DEFINE_integer("epochs", 50, "Number of training epochs.")
 model_path = os.path.join(os.getcwd(),'model.ckpt')
 
 # # Preprocessing 
-
-# ### Load data: text8 wikipedia dump (http://mattmahoney.net/dc/textdata.html)
 
 def sentence_clean(sentence):
     review_text = BeautifulSoup(sentence,"html5lib").get_text()  
@@ -98,7 +89,7 @@ class Data_obj():
 
             self.epoch += 1
 
-#### Load data
+# ### Load data: text8 wikipedia dump (http://mattmahoney.net/dc/textdata.html)
 txt8_clean_path = "txt8_clean" #path to cleaned data
 if not os.path.exists(txt8_clean_path):
     print("{0} not found. Loading raw and cleaning.".format(txt8_clean_path))
@@ -153,9 +144,9 @@ saver = tf.train.Saver()
 embedding_norm=tf.nn.l2_normalize(embeddings,axis=1)
 similarity = tf.matmul(embedding_norm, tf.transpose(embedding_norm))
 
-
 # ### Training
 if FLAGS.train == True:
+    print("Training")
     with tf.Session() as sess:
         if FLAGS.load == True:
             saver.restore(sess,model_path)
@@ -184,36 +175,34 @@ if FLAGS.train == True:
             if data_obj.epoch == FLAGS.epochs:
                 print("Finished.")
                 break
-        
-
 
 
 # ### Top words and their predicted counterparts
 if FLAGS.inference == True:
+    print("Inference")
     with tf.Session() as sess:
         saver.restore(sess,model_path)
-        top_n_words = 3
         learnt_embeddings = embeddings.eval()
-        for word_no in range(1,vocabulary_size)[:10]:
-            word = data_obj.inverse_tokenizer(word_no)
+        top_n_words = 5 
+
+        for word in ["education","port","america","three","philosophy","social","state"]:
+            word_no = data_obj.Tokenizer.word_index[word]
             feed_dict={train_inputs:np.array([word_no])}
             word_embed, word_pred = sess.run([embed,soft_max],feed_dict)
             word_pred = word_pred.squeeze()
             top_n_args = word_pred.argsort()[-top_n_words:]
-
-            print(word,word_no)
+            print("Word = {0}".format(word))
             print(data_obj.inverse_tokenizer_sentence(top_n_args))
             print("\n")
-
-
+        
     # # Visulization
-    for perplexity in range(5,35,5):
-        n_words_display = 60 # look at first n_words_display embedded
+    for perplexity in range(5,20,2):
+        n_words_display = 80 # look at first n_words_display embedded
         tsne = TSNE(n_components=2,perplexity=perplexity)
         reduced_embeddings = tsne.fit_transform(learnt_embeddings[1:n_words_display+1]) #first embedding is meaningless (cant index it)
         labels = [data_obj.inverse_tokenizer(word_no) for word_no in range(1,vocabulary_size)[:n_words_display]]
 
-        plt.figure(figsize=(15,15))
+        plt.figure(figsize=(25,25))
         plt.subplots_adjust(bottom = 0.1)
         plt.scatter(
             reduced_embeddings[:, 0], reduced_embeddings[:, 1], marker='o',
