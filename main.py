@@ -5,6 +5,7 @@ import pandas as pd
 import os, pdb, re, pdb, string, pickle
 import matplotlib
 import matplotlib.pyplot as plt
+plt.style.use('ggplot')
 matplotlib.use("Agg")
 
 #Preprocessing
@@ -20,13 +21,12 @@ from sklearn.manifold import TSNE
 
 flags = tf.app.flags
 FLAGS = flags.FLAGS
-flags.DEFINE_float("learning_rate", 0.3, "Initial learning rate.")
+flags.DEFINE_float("learning_rate", 0.8, "Initial learning rate.")
 flags.DEFINE_integer("batch_size", 5, "Batch size.")
 flags.DEFINE_integer("embedding_size", 48, "Size of word embedding layer.")
 flags.DEFINE_boolean("load", True, "Load previous checkpoint?")
 flags.DEFINE_boolean("train", True, "Training model.")
 flags.DEFINE_boolean("inference", True, "Inference.")
-flags.DEFINE_boolean("visualize", True, "Visualize embeddings.")
 flags.DEFINE_integer("n_epochs", 50, "Number of training epochs.")
 flags.DEFINE_string("model_path", "model.ckpt", "Model path.")
 
@@ -149,10 +149,6 @@ class Model():
         self.optimizer = tf.train.GradientDescentOptimizer(self.learning_rate).minimize(self.loss)
         self.saver = tf.train.Saver()
 
-        #cosine similarity
-        #embedding_norm=tf.nn.l2_normalize(embeddings,axis=1)
-        #similarity = tf.matmul(embedding_norm, tf.transpose(embedding_norm))
-
     def train(self,load):
         self.graph()
         with tf.Session() as sess:
@@ -171,25 +167,29 @@ class Model():
                 feed_dict = {self.train_inputs: data[:,0],self.train_context:data[:,[1]],self.learning_rate:self.lr}
                 _, cur_loss = sess.run([self.optimizer, self.loss], feed_dict=feed_dict)
                 cur_losses.append(cur_loss)
-                if self.data_obj.total_examples_seen % 10000 == 0 and self.data_obj.total_examples_seen > 0:
-                    print("{0} seen with running loss of {1:.3f}. Current epoch = {2}. Current LR = {3:.3f}".format(
+                if self.data_obj.total_examples_seen % 100000 == 0 and self.data_obj.total_examples_seen > 0:
+                    self.saver.save(sess,self.model_path)
+                    print("{0} seen with running loss of {1:.3f}. Current epoch = {2}. Current LR = {3:.3f}. Saved in {4}.".format(
                         self.data_obj.total_examples_seen,
                         np.mean(cur_losses),
                         self.data_obj.epoch,
-                        self.lr))
+                        self.lr,
+                        self.model_path))
                     cur_losses = []
-                    self.lr/= 1.01
-                    self.saver.save(sess,self.model_path)
-                    print("Saved in {0}.".format(self.model_path))
+                    self.lr/= 1.001
+
                 if self.data_obj.epoch == self.n_epochs:
                     print("Finished.")
                     break
 
     def inference_examples(self):
+        tf.reset_default_graph()
         self.graph()
         with tf.Session() as sess:
-            saver.restore(sess,self.model_path)
+            self.saver.restore(sess,self.model_path)
+            print("Restored {0}.".format(self.model_path))
 
+            top_n_words = 10
             for word in ["education","port","america","three","philosophy","social","state"]:
                 word_no = self.data_obj.Tokenizer.word_index[word]
                 feed_dict={self.train_inputs:np.array([word_no])}
@@ -201,16 +201,20 @@ class Model():
                 print("\n")
 
     def visualize(self): 
+        tf.reset_default_graph()
         self.graph()
         with tf.Session() as sess:
-            saver.restore(sess,self.model_path)
+            self.saver.restore(sess,self.model_path)
             learnt_embeddings = self.embeddings.eval()
 
+        folder = "vis/"
+        if not os.path.exists(folder):
+            os.makedirs(folder)
         for perplexity in range(5,20,2):
             n_words_display = 80 # look at first n_words_display embedded
             tsne = TSNE(n_components=2,perplexity=perplexity)
             reduced_embeddings = tsne.fit_transform(learnt_embeddings[1:n_words_display+1]) #first embedding is meaningless (cant index it)
-            labels = [data_obj.inverse_tokenizer(word_no) for word_no in range(1,vocabulary_size)[:n_words_display]]
+            labels = [self.data_obj.inverse_tokenizer(word_no) for word_no in range(1,self.vocabulary_size)[:n_words_display]]
 
             plt.figure(figsize=(25,25))
             plt.subplots_adjust(bottom = 0.1)
@@ -226,7 +230,7 @@ class Model():
                     bbox=dict(boxstyle='round,pad=0.5', fc='yellow', alpha=0.5),
                     arrowprops=dict(arrowstyle = '->', connectionstyle='arc3,rad=0'))
 
-            save_path = "visualization_perplex_{0}.png".format(perplexity)
+            save_path = folder + "visualization_perplex_{0}.png".format(perplexity)
             plt.savefig(save_path)
             print("Saved {0}.".format(save_path))
             plt.close()
@@ -242,9 +246,8 @@ if __name__ == "__main__":
             n_epochs=FLAGS.n_epochs)
     if FLAGS.train == True:
         model_obj.train(load=FLAGS.load)
-    if FLAGS.inference == True:
-        model_obj.inference()
-    if FLAGS.visualize== True:
+    if FLAGS.inference== True:
+        model_obj.inference_examples()
         model_obj.visualize()
 
 
