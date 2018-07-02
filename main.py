@@ -5,6 +5,7 @@ import pandas as pd
 import os, pdb, re, pdb, string, pickle
 import matplotlib
 import matplotlib.pyplot as plt
+from datetime import datetime
 plt.style.use('ggplot')
 matplotlib.use("Agg")
 
@@ -19,6 +20,7 @@ import time
 from keras.preprocessing import sequence
 
 #Visualization
+from tensorflow.contrib.tensorboard.plugins import projector
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 
@@ -41,7 +43,7 @@ def sentence_clean(sentence):
     review_text = BeautifulSoup(sentence,"html5lib").get_text()  
     letters_only = re.sub("[^a-zA-Z]", " ", sentence) #Remove non-letters
     words = letters_only.lower().split()    #Convert to lower case, split into individual words
-    #words = words[:500000]
+    words = words[:500000]
     stemmer = PorterStemmer()
     words_stemmed = list(map(stemmer.stem,words)) # expensive
     stops = set(stopwords.words("english"))                  
@@ -123,7 +125,7 @@ def load_data(clean=False):
     return txt8_data_clean
 
 def makedirs():
-    dirs = ['model','summary','vis']
+    dirs = ['models','summary','vis']
     [os.makedirs(dir) for dir in dirs if not os.path.exists(dir)]
         
 # # Model
@@ -141,15 +143,19 @@ class Model():
         #### Graph
         self.train_inputs = tf.placeholder(tf.int32, shape=[None])
         self.train_context = tf.placeholder(tf.int32, shape=[None, 1])
-        self.embeddings = tf.Variable(
-            tf.random_uniform([self.vocabulary_size, self.embedding_size], -1.0, 1.0))
-        self.embed = tf.nn.embedding_lookup(self.embeddings, self.train_inputs)
+        config = projector.ProjectorConfig()
+        with tf.name_scope("Embedding"):
+            self.embeddings = tf.Variable(tf.random_uniform([self.vocabulary_size, self.embedding_size], -1.0, 1.0),name="embedding_matrix")
+            self.embed = tf.nn.embedding_lookup(self.embeddings, self.train_inputs,name="look_up")
+        embedding = config.embeddings.add()
+        embedding.tensor_name = self.embeddings.name
 
         #NCE Loss
-        nce_weights = tf.Variable(
-                tf.truncated_normal([self.vocabulary_size, self.embedding_size],
-                                    stddev=1.0 / np.sqrt(self.embedding_size)))
-        nce_biases = tf.Variable(tf.zeros([self.vocabulary_size]))
+        with tf.name_scope("Weights"):
+            nce_weights = tf.Variable(
+                    tf.truncated_normal([self.vocabulary_size, self.embedding_size],
+                                        stddev=1.0 / np.sqrt(self.embedding_size)))
+            nce_biases = tf.Variable(tf.zeros([self.vocabulary_size]))
         hidden_out = tf.matmul(self.embed, tf.transpose(nce_weights)) + nce_biases
         self.soft_max = tf.nn.softmax(hidden_out)
         self.loss = tf.reduce_mean(
@@ -176,7 +182,11 @@ class Model():
         self.graph()
         with tf.Session() as sess:
             # Summaries
-            writer  =  tf.summary.FileWriter( 'summary/' ,tf.get_default_graph())
+            now = datetime.now()
+            writer_path = 'summary/{0}/'.format(now.strftime("%Y%m%d-%H%M%S"))
+            if not os.path.exists(writer_path):
+                os.makedirs(writer_path)
+            writer  =  tf.summary.FileWriter(writer_path, tf.get_default_graph())
             if load == True:
                 self.saver.restore(sess,self.model_path)
                 print("Restored {0}.".format(self.model_path))
