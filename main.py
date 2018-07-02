@@ -27,6 +27,7 @@ flags.DEFINE_integer("embedding_size", 48, "Size of word embedding layer.")
 flags.DEFINE_boolean("load", True, "Load previous checkpoint?")
 flags.DEFINE_boolean("train", True, "Training model.")
 flags.DEFINE_boolean("inference", True, "Inference.")
+flags.DEFINE_boolean("visualize", True, "Visualize embeddings.")
 flags.DEFINE_integer("n_epochs", 50, "Number of training epochs.")
 flags.DEFINE_string("model_path", "model.ckpt", "Model path.")
 
@@ -182,15 +183,13 @@ class Model():
                     print("Finished.")
                     break
 
-    def inference_examples(self):
+    def inference(self,top_n_words=5,examples=True):
         tf.reset_default_graph()
         self.graph()
         with tf.Session() as sess:
             self.saver.restore(sess,self.model_path)
             print("Restored {0}.".format(self.model_path))
-
-            top_n_words = 10
-            for word in ["education","port","america","three","philosophy","social","state"]:
+            def return_closest_words(word):
                 word_no = self.data_obj.Tokenizer.word_index[word]
                 feed_dict={self.train_inputs:np.array([word_no])}
                 word_embed, word_pred = sess.run([self.embed,self.soft_max],feed_dict)
@@ -199,6 +198,14 @@ class Model():
                 print("Word = {0}".format(word))
                 print(self.data_obj.inverse_tokenizer_sentence(top_n_args))
                 print("\n")
+            if examples == True:
+                [return_closest_words(word) for word in ["education","port","america","three","philosophy","social","state"]]
+            while True:
+                word = input("Enter word == >")
+                try:
+                    return_closest_words(word)
+                except KeyError:
+                    print("Not a valid word. Try again.")
 
     def visualize(self): 
         tf.reset_default_graph()
@@ -247,11 +254,6 @@ if __name__ == "__main__":
     if FLAGS.train == True:
         model_obj.train(load=FLAGS.load)
     if FLAGS.inference== True:
-        model_obj.inference_examples()
+        model_obj.inference()
+    if FLAGS.visualize== True:
         model_obj.visualize()
-
-
-# ### Top words and their predicted counterparts
-
-            
-
