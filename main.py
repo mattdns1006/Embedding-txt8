@@ -11,6 +11,8 @@ matplotlib.use("Agg")
 #Preprocessing
 import nltk
 from nltk.corpus import stopwords
+from nltk.stem.porter import *
+#from nltk.stem import WordNetLemmatizer as WNL # to try
 from bs4 import BeautifulSoup
 import keras.preprocessing.text as text
 from keras.preprocessing import sequence
@@ -21,25 +23,29 @@ from sklearn.manifold import TSNE
 
 flags = tf.app.flags
 FLAGS = flags.FLAGS
+flags.DEFINE_integer("embedding_size", 48, "Size of word embedding layer.")
 flags.DEFINE_float("learning_rate", 0.8, "Initial learning rate.")
 flags.DEFINE_integer("batch_size", 5, "Batch size.")
-flags.DEFINE_integer("embedding_size", 48, "Size of word embedding layer.")
+flags.DEFINE_integer("n_epochs", 50, "Number of training epochs.")
+flags.DEFINE_boolean("clean", False, "Clean raw - eg if trying new preprocessing.")
 flags.DEFINE_boolean("load", True, "Load previous checkpoint?")
 flags.DEFINE_boolean("train", True, "Training model.")
 flags.DEFINE_boolean("inference", True, "Inference.")
 flags.DEFINE_boolean("visualize", True, "Visualize embeddings.")
-flags.DEFINE_integer("n_epochs", 50, "Number of training epochs.")
-flags.DEFINE_string("model_path", "model.ckpt", "Model path.")
-
 
 # # Preprocessing 
-
 def sentence_clean(sentence):
     review_text = BeautifulSoup(sentence,"html5lib").get_text()  
     letters_only = re.sub("[^a-zA-Z]", " ", sentence) #Remove non-letters
-    words = letters_only.lower().split()    #Convert to lower case, split into individual words                          
+    words = letters_only.lower().split()    #Convert to lower case, split into individual words
+    words = words[:500000]
+    stemmer = PorterStemmer()
+    words_stemmed = list(map(stemmer.stem,words)) # expensive
     stops = set(stopwords.words("english"))                  
-    meaningful_words = [w for w in words if not w in stops] #Remove stop words
+    df_analyse = pd.DataFrame({'before':words,'after':words_stemmed}) # see how stemming works
+    df_analyse.sample(200).to_csv("before_after_stem.csv")
+    meaningful_words = [w for w in words_stemmed if not w in stops] #Remove stop words
+    print("Finished cleaning")
     return( " ".join( meaningful_words )) #Join the words back into one string separated by space
 
 class Data_obj():
@@ -92,32 +98,36 @@ class Data_obj():
             self.epoch += 1
 
 # ### Load data: text8 wikipedia dump (http://mattmahoney.net/dc/textdata.html)
-txt8_clean_path = "txt8_clean" #path to cleaned data
-if not os.path.exists(txt8_clean_path):
-    print("{0} not found. Loading raw and cleaning.".format(txt8_clean_path))
+def load_data(clean=False):
+    txt8_clean_path = "txt8_clean" #path to cleaned data
+    if not os.path.exists(txt8_clean_path) or FLAGS.clean == True:
+        print("Loading raw and cleaning.")
 
-    with open('/Users/matt/gensim-data/text8/text8') as f:
-        txt8_data = f.read()
-        print("Length of dataset in words = {0}.".format(len(txt8_data)))
-        f.close()
-    txt8_data_clean = [sentence_clean(txt8_data)] # Clean - takes a while
+        with open('/Users/matt/gensim-data/text8/text8') as f:
+            txt8_data = f.read()
+            print("Length of dataset in words = {0}.".format(len(txt8_data)))
+            f.close()
+        txt8_data_clean = [sentence_clean(txt8_data)] # Clean - takes a while
 
-    with open(txt8_clean_path,"wb") as fp:
-        pickle.dump(txt8_data_clean,fp)
-else:
-    print("{0} found!".format(txt8_clean_path))
-    with open(txt8_clean_path,"rb") as fp:
-        txt8_data_clean = pickle.load(fp)
-print("Length of (cleaned) dataset in words = {0}.".format(len(txt8_data_clean[0])))
+        with open(txt8_clean_path,"wb") as fp:
+            pickle.dump(txt8_data_clean,fp)
+    else:
+        print("{0} found!".format(txt8_clean_path))
+        with open(txt8_clean_path,"rb") as fp:
+            txt8_data_clean = pickle.load(fp)
+    print("Length of (cleaned) dataset in words = {0}.".format(len(txt8_data_clean[0])))
+    return txt8_data_clean
 
-
-
+def makedirs():
+    dirs = ['model','vis']
+    [os.makedirs(dir) for dir in dirs if not os.path.exists(dir)]
+        
 # # Model
 class Model():
     def __init__(self,model_path,data_obj,embedding_size,lr,n_epochs):
 
         self.data_obj = data_obj
-        self.model_path = os.path.join(os.getcwd(),model_path)
+        self.model_path = os.path.join(os.getcwd(),"models/"+model_path)
         self.vocabulary_size = data_obj.vocab_size
         self.embedding_size = embedding_size
         self.lr = lr
@@ -147,10 +157,19 @@ class Model():
                                num_classes=self.vocabulary_size))
         # Optimization 
         self.learning_rate = tf.placeholder(tf.float32)
-        self.optimizer = tf.train.GradientDescentOptimizer(self.learning_rate).minimize(self.loss)
+        self.global_step = tf.Variable(0,dtype=tf.int32,trainable=False,name='global_step')
+        self.optimizer = tf.train.GradientDescentOptimizer(self.learning_rate).minimize(self.loss,global_step=self.global_step)
         self.saver = tf.train.Saver()
 
+        # Summaries
+        with tf.name_scope("Summaries"):
+            tf.summary.scalar('nce_loss',self.loss)
+            tf.summary.scalar('learning_rate',self.learning_rate)
+            tf.summary.histogram('histogram loss',self.loss)
+            self.summary_op = tf.summary.merge_all()
+
     def train(self,load):
+
         self.graph()
         with tf.Session() as sess:
             if load == True:
@@ -162,11 +181,12 @@ class Model():
             self.embeddings_before = self.embeddings.eval()
             cur_losses = []
             batch_generater = self.data_obj.generator()
+            writer  =  tf.summary.FileWriter( 'models/' ,sess.graph)
             print("Training")
             while True:
                 data = next(batch_generater)
                 feed_dict = {self.train_inputs: data[:,0],self.train_context:data[:,[1]],self.learning_rate:self.lr}
-                _, cur_loss = sess.run([self.optimizer, self.loss], feed_dict=feed_dict)
+                _, cur_loss,summary = sess.run([self.optimizer, self.loss, self.summary_op], feed_dict=feed_dict)
                 cur_losses.append(cur_loss)
                 if self.data_obj.total_examples_seen % 100000 == 0 and self.data_obj.total_examples_seen > 0:
                     self.saver.save(sess,self.model_path)
@@ -214,9 +234,6 @@ class Model():
             self.saver.restore(sess,self.model_path)
             learnt_embeddings = self.embeddings.eval()
 
-        folder = "vis/"
-        if not os.path.exists(folder):
-            os.makedirs(folder)
         for perplexity in range(5,20,2):
             n_words_display = 80 # look at first n_words_display embedded
             tsne = TSNE(n_components=2,perplexity=perplexity)
@@ -244,9 +261,12 @@ class Model():
 
 #### Data object initiazation
 if __name__ == "__main__":
+    model_path = "model_{0}.ckpt".format(FLAGS.embedding_size)
+    txt8_data_clean = load_data()
+    makedirs()
     data_obj = Data_obj(batch_size=FLAGS.batch_size,clean_data=txt8_data_clean)
     model_obj = Model(
-            model_path=FLAGS.model_path,
+            model_path=model_path,
             data_obj=data_obj,
             embedding_size=FLAGS.embedding_size,
             lr=FLAGS.learning_rate,
