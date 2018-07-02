@@ -15,6 +15,7 @@ from nltk.stem.porter import *
 #from nltk.stem import WordNetLemmatizer as WNL # to try
 from bs4 import BeautifulSoup
 import keras.preprocessing.text as text
+import time
 from keras.preprocessing import sequence
 
 #Visualization
@@ -35,17 +36,21 @@ flags.DEFINE_boolean("visualize", True, "Visualize embeddings.")
 
 # # Preprocessing 
 def sentence_clean(sentence):
+    print("Cleaning")
+    clean_start = time.time()
     review_text = BeautifulSoup(sentence,"html5lib").get_text()  
     letters_only = re.sub("[^a-zA-Z]", " ", sentence) #Remove non-letters
     words = letters_only.lower().split()    #Convert to lower case, split into individual words
-    words = words[:500000]
+    #words = words[:500000]
     stemmer = PorterStemmer()
     words_stemmed = list(map(stemmer.stem,words)) # expensive
     stops = set(stopwords.words("english"))                  
     df_analyse = pd.DataFrame({'before':words,'after':words_stemmed}) # see how stemming works
     df_analyse.sample(200).to_csv("before_after_stem.csv")
     meaningful_words = [w for w in words_stemmed if not w in stops] #Remove stop words
-    print("Finished cleaning")
+    clean_end = time.time()
+    time_taken = clean_end - clean_start
+    print("Finished cleaning. Took {0:.2f} seconds.".format(time_taken))
     return( " ".join( meaningful_words )) #Join the words back into one string separated by space
 
 class Data_obj():
@@ -101,8 +106,7 @@ class Data_obj():
 def load_data(clean=False):
     txt8_clean_path = "txt8_clean" #path to cleaned data
     if not os.path.exists(txt8_clean_path) or FLAGS.clean == True:
-        print("Loading raw and cleaning.")
-
+        print("Loading raw.")
         with open('/Users/matt/gensim-data/text8/text8') as f:
             txt8_data = f.read()
             print("Length of dataset in words = {0}.".format(len(txt8_data)))
@@ -119,7 +123,7 @@ def load_data(clean=False):
     return txt8_data_clean
 
 def makedirs():
-    dirs = ['model','vis']
+    dirs = ['model','summary','vis']
     [os.makedirs(dir) for dir in dirs if not os.path.exists(dir)]
         
 # # Model
@@ -161,43 +165,48 @@ class Model():
         self.optimizer = tf.train.GradientDescentOptimizer(self.learning_rate).minimize(self.loss,global_step=self.global_step)
         self.saver = tf.train.Saver()
 
-        # Summaries
         with tf.name_scope("Summaries"):
             tf.summary.scalar('nce_loss',self.loss)
             tf.summary.scalar('learning_rate',self.learning_rate)
             tf.summary.histogram('histogram loss',self.loss)
-            self.summary_op = tf.summary.merge_all()
+        self.summary_op = tf.summary.merge_all()
 
     def train(self,load):
 
         self.graph()
         with tf.Session() as sess:
+            # Summaries
+            writer  =  tf.summary.FileWriter( 'summary/' ,tf.get_default_graph())
             if load == True:
                 self.saver.restore(sess,self.model_path)
                 print("Restored {0}.".format(self.model_path))
             else:
                 init = tf.global_variables_initializer()
                 sess.run(init)
-            self.embeddings_before = self.embeddings.eval()
             cur_losses = []
             batch_generater = self.data_obj.generator()
-            writer  =  tf.summary.FileWriter( 'models/' ,sess.graph)
             print("Training")
+            step = 0
             while True:
                 data = next(batch_generater)
                 feed_dict = {self.train_inputs: data[:,0],self.train_context:data[:,[1]],self.learning_rate:self.lr}
                 _, cur_loss,summary = sess.run([self.optimizer, self.loss, self.summary_op], feed_dict=feed_dict)
                 cur_losses.append(cur_loss)
-                if self.data_obj.total_examples_seen % 100000 == 0 and self.data_obj.total_examples_seen > 0:
-                    self.saver.save(sess,self.model_path)
-                    print("{0} seen with running loss of {1:.3f}. Current epoch = {2}. Current LR = {3:.3f}. Saved in {4}.".format(
+                writer.add_summary(summary, step)
+                step += 1
+
+                if self.data_obj.total_examples_seen % 10000 == 0 and self.data_obj.total_examples_seen > 0:
+                    print("{0} seen with running loss of {1:.3f}. Current epoch = {2}. Current LR = {3:.3f}. ".format(
                         self.data_obj.total_examples_seen,
                         np.mean(cur_losses),
                         self.data_obj.epoch,
-                        self.lr,
-                        self.model_path))
+                        self.lr))
                     cur_losses = []
                     self.lr/= 1.001
+
+                if self.data_obj.total_examples_seen % 2000000 == 0:
+                    self.saver.save(sess,self.model_path)
+                    print("Saved in {0}.".format(self.model_path))
 
                 if self.data_obj.epoch == self.n_epochs:
                     print("Finished.")
