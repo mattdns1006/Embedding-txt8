@@ -2,7 +2,7 @@ import tensorflow as tf
 import numpy as np
 import numpy.random as rng
 import pandas as pd
-import os, pdb, re, pdb, string, pickle
+import os, re, pdb, string, pickle
 import matplotlib
 import matplotlib.pyplot as plt
 from datetime import datetime
@@ -27,7 +27,7 @@ from sklearn.manifold import TSNE
 flags = tf.app.flags
 FLAGS = flags.FLAGS
 flags.DEFINE_integer("embedding_size", 48, "Size of word embedding layer.")
-flags.DEFINE_float("learning_rate", 0.8, "Initial learning rate.")
+flags.DEFINE_float("learning_rate", 1.0, "Initial learning rate.")
 flags.DEFINE_integer("batch_size", 5, "Batch size.")
 flags.DEFINE_integer("n_epochs", 50, "Number of training epochs.")
 flags.DEFINE_boolean("clean", False, "Clean raw - eg if trying new preprocessing.")
@@ -37,19 +37,22 @@ flags.DEFINE_boolean("inference", True, "Inference.")
 flags.DEFINE_boolean("visualize", True, "Visualize embeddings.")
 
 # # Preprocessing 
-def sentence_clean(sentence):
+def sentence_clean(sentence,stem=False):
     print("Cleaning")
     clean_start = time.time()
     review_text = BeautifulSoup(sentence,"html5lib").get_text()  
     letters_only = re.sub("[^a-zA-Z]", " ", sentence) #Remove non-letters
     words = letters_only.lower().split()    #Convert to lower case, split into individual words
-    words = words[:500000]
-    stemmer = PorterStemmer()
-    words_stemmed = list(map(stemmer.stem,words)) # expensive
+    words = words[590000:600000]
+    if stem==True:
+        stemmer = PorterStemmer()
+        words_stemmed = list(map(stemmer.stem,words)) # expensive
+        df_analyse = pd.DataFrame({'before':words,'after':words_stemmed}) # see how stemming works
+        df_analyse.sample(200).to_csv("before_after_stem.csv")
+        words = words_stemmed[:]
+
     stops = set(stopwords.words("english"))                  
-    df_analyse = pd.DataFrame({'before':words,'after':words_stemmed}) # see how stemming works
-    df_analyse.sample(200).to_csv("before_after_stem.csv")
-    meaningful_words = [w for w in words_stemmed if not w in stops] #Remove stop words
+    meaningful_words = [w for w in words if not w in stops] #Remove stop words
     clean_end = time.time()
     time_taken = clean_end - clean_start
     print("Finished cleaning. Took {0:.2f} seconds.".format(time_taken))
@@ -114,7 +117,6 @@ def load_data(clean=False):
             print("Length of dataset in words = {0}.".format(len(txt8_data)))
             f.close()
         txt8_data_clean = [sentence_clean(txt8_data)] # Clean - takes a while
-
         with open(txt8_clean_path,"wb") as fp:
             pickle.dump(txt8_data_clean,fp)
     else:
@@ -124,31 +126,40 @@ def load_data(clean=False):
     print("Length of (cleaned) dataset in words = {0}.".format(len(txt8_data_clean[0])))
     return txt8_data_clean
 
-def makedirs():
-    dirs = ['models','summary','vis']
+def makedirs(model_dir):
+    dirs = ['models','vis']
+    dirs.append(model_dir)
     [os.makedirs(dir) for dir in dirs if not os.path.exists(dir)]
         
 # # Model
 class Model():
-    def __init__(self,model_path,data_obj,embedding_size,lr,n_epochs):
+    def __init__(self,model_dir,data_obj,embedding_size,lr,n_epochs):
 
         self.data_obj = data_obj
-        self.model_path = os.path.join(os.getcwd(),"models/"+model_path)
+        self.model_dir = model_dir
+        self.model_path = self.model_dir + "model.ckpt" 
         self.vocabulary_size = data_obj.vocab_size
         self.embedding_size = embedding_size
         self.lr = lr
         self.n_epochs = n_epochs
+        self.labels_path = os.path.join(self.model_dir,'labels.tsv')
+        labels = pd.DataFrame(list(self.data_obj.words))
+        labels.to_csv(self.labels_path,sep='\t',index=False,header=True)
 
     def graph(self):
         #### Graph
         self.train_inputs = tf.placeholder(tf.int32, shape=[None])
         self.train_context = tf.placeholder(tf.int32, shape=[None, 1])
-        config = projector.ProjectorConfig()
+
         with tf.name_scope("Embedding"):
             self.embeddings = tf.Variable(tf.random_uniform([self.vocabulary_size, self.embedding_size], -1.0, 1.0),name="embedding_matrix")
             self.embed = tf.nn.embedding_lookup(self.embeddings, self.train_inputs,name="look_up")
-        embedding = config.embeddings.add()
+        self.projector_config = projector.ProjectorConfig()
+        embedding = self.projector_config.embeddings.add()
         embedding.tensor_name = self.embeddings.name
+        #embedding.metadata_path = self.labels_path 
+        embedding.metadata_path = "labels.tsv"
+
 
         #NCE Loss
         with tf.name_scope("Weights"):
@@ -183,10 +194,9 @@ class Model():
         with tf.Session() as sess:
             # Summaries
             now = datetime.now()
-            writer_path = 'summary/{0}/'.format(now.strftime("%Y%m%d-%H%M%S"))
-            if not os.path.exists(writer_path):
-                os.makedirs(writer_path)
-            writer  =  tf.summary.FileWriter(writer_path, tf.get_default_graph())
+            #writer_path = 'summary/{0}/'.format(now.strftime("%Y%m%d-%H%M%S"))
+            writer  =  tf.summary.FileWriter(self.model_dir, tf.get_default_graph())
+            projector.visualize_embeddings(writer, self.projector_config)
             if load == True:
                 self.saver.restore(sess,self.model_path)
                 print("Restored {0}.".format(self.model_path))
@@ -280,12 +290,12 @@ class Model():
 
 #### Data object initiazation
 if __name__ == "__main__":
-    model_path = "model_{0}.ckpt".format(FLAGS.embedding_size)
+    model_dir = "models/model_{0}/".format(FLAGS.embedding_size)
     txt8_data_clean = load_data()
-    makedirs()
+    makedirs(model_dir)
     data_obj = Data_obj(batch_size=FLAGS.batch_size,clean_data=txt8_data_clean)
     model_obj = Model(
-            model_path=model_path,
+            model_dir=model_dir,
             data_obj=data_obj,
             embedding_size=FLAGS.embedding_size,
             lr=FLAGS.learning_rate,
