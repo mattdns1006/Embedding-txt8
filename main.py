@@ -6,11 +6,17 @@ import os, re, pdb, string, pickle,operator
 import matplotlib
 import matplotlib.pyplot as plt
 from datetime import datetime
+import gensim.downloader as api
+import gzip
 plt.style.use('ggplot')
 matplotlib.use("Agg")
 
+import os 
+os.environ["CUDA_VISIBLE_DEVICES"]="0" 
+
 #Preprocessing
 import nltk
+nltk.download('stopwords')
 from nltk.corpus import stopwords
 from nltk.stem.porter import *
 #from nltk.stem import WordNetLemmatizer as WNL # to try
@@ -26,7 +32,7 @@ from sklearn.manifold import TSNE
 
 flags = tf.app.flags
 FLAGS = flags.FLAGS
-flags.DEFINE_integer("embedding_size", 48, "Size of word embedding layer.")
+flags.DEFINE_integer("embedding_size", 96, "Size of word embedding layer.")
 flags.DEFINE_float("learning_rate", 1.0, "Initial learning rate.")
 flags.DEFINE_integer("batch_size", 5, "Batch size.")
 flags.DEFINE_integer("n_epochs", 50, "Number of training epochs.")
@@ -43,7 +49,6 @@ def sentence_clean(sentence,stem=False):
     review_text = BeautifulSoup(sentence,"html5lib").get_text()  
     letters_only = re.sub("[^a-zA-Z]", " ", sentence) #Remove non-letters
     words = letters_only.lower().split()    #Convert to lower case, split into individual words
-    words = words[590000:600000]
     if stem==True:
         stemmer = PorterStemmer()
         words_stemmed = list(map(stemmer.stem,words)) # expensive
@@ -112,13 +117,17 @@ def load_data(clean=False):
     txt8_clean_path = "txt8_clean" #path to cleaned data
     if not os.path.exists(txt8_clean_path) or FLAGS.clean == True:
         print("Loading raw.")
-        with open('/Users/matt/gensim-data/text8/text8') as f:
-            txt8_data = f.read()
-            print("Length of dataset in words = {0}.".format(len(txt8_data)))
-            f.close()
-        txt8_data_clean = [sentence_clean(txt8_data)] # Clean - takes a while
-        with open(txt8_clean_path,"wb") as fp:
-            pickle.dump(txt8_data_clean,fp)
+        path = os.path.expanduser("~") + "/gensim-data/text8/text8.gz"
+        if not os.path.exists(path):
+            api.load('text8')
+            with open(path) as f:
+                f = gzip.open(path, 'rb')
+                txt8_data = f.read()
+                f.close()
+                print("Length of dataset in words = {0}.".format(len(txt8_data)))
+            txt8_data_clean = [sentence_clean(txt8_data)] # Clean - takes a while
+            with open(txt8_clean_path,"wb") as fp:
+                pickle.dump(txt8_data_clean,fp)
     else:
         print("{0} found!".format(txt8_clean_path))
         with open(txt8_clean_path,"rb") as fp:
@@ -225,9 +234,9 @@ class Model():
                         self.data_obj.epoch,
                         self.lr))
                     cur_losses = []
-                    self.lr/= 1.001
 
-                if self.data_obj.total_examples_seen % 2000000 == 0:
+                if self.data_obj.total_examples_seen % 1000000 == 0:
+                    self.lr/= 1.03
                     self.saver.save(sess,self.model_path)
                     print("Saved in {0}.".format(self.model_path))
 
