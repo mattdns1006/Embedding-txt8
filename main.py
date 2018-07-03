@@ -2,7 +2,7 @@ import tensorflow as tf
 import numpy as np
 import numpy.random as rng
 import pandas as pd
-import os, re, pdb, string, pickle
+import os, re, pdb, string, pickle,operator
 import matplotlib
 import matplotlib.pyplot as plt
 from datetime import datetime
@@ -33,7 +33,7 @@ flags.DEFINE_integer("n_epochs", 50, "Number of training epochs.")
 flags.DEFINE_boolean("clean", False, "Clean raw - eg if trying new preprocessing.")
 flags.DEFINE_boolean("load", True, "Load previous checkpoint?")
 flags.DEFINE_boolean("train", True, "Training model.")
-flags.DEFINE_boolean("inference", True, "Inference.")
+flags.DEFINE_boolean("inference", False, "Inference.")
 flags.DEFINE_boolean("visualize", True, "Visualize embeddings.")
 
 # # Preprocessing 
@@ -143,7 +143,10 @@ class Model():
         self.lr = lr
         self.n_epochs = n_epochs
         self.labels_path = os.path.join(self.model_dir,'labels.tsv')
-        labels = pd.DataFrame(list(self.data_obj.words))
+        word_dict = self.data_obj.Tokenizer.word_index
+        word_dict['index_0'] = 0
+        sorted_word_dict = sorted(word_dict.items(), key=operator.itemgetter(1))
+        labels = pd.DataFrame(list(sorted_word_dict))
         labels.to_csv(self.labels_path,sep='\t',index=False,header=True)
 
     def graph(self):
@@ -248,7 +251,7 @@ class Model():
                 print(self.data_obj.inverse_tokenizer_sentence(top_n_args))
                 print("\n")
             if examples == True:
-                [return_closest_words(word) for word in ["education","port","america","three","philosophy","social","state"]]
+                [return_closest_words(word) for word in ["one","nine","american","words","state"]]
             while True:
                 word = input("Enter word == >")
                 try:
@@ -259,6 +262,7 @@ class Model():
     def visualize(self): 
         tf.reset_default_graph()
         self.graph()
+        folder = "vis/"
         with tf.Session() as sess:
             self.saver.restore(sess,self.model_path)
             learnt_embeddings = self.embeddings.eval()
