@@ -2,25 +2,17 @@ import tensorflow as tf
 import numpy as np
 import numpy.random as rng
 import pandas as pd
-import os, re, pdb, string, pickle,operator
+import os, re, operator
 import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from datetime import datetime
-import gensim.downloader as api
-import gzip
 plt.style.use('ggplot')
-matplotlib.use("Agg")
 
 import os 
 os.environ["CUDA_VISIBLE_DEVICES"]="0" 
 
 #Preprocessing
-import nltk
-nltk.download('stopwords')
-from nltk.corpus import stopwords
-from nltk.stem.porter import *
-#from nltk.stem import WordNetLemmatizer as WNL # to try
-from bs4 import BeautifulSoup
 import keras.preprocessing.text as text
 import time
 from keras.preprocessing import sequence
@@ -29,40 +21,21 @@ from keras.preprocessing import sequence
 from tensorflow.contrib.tensorboard.plugins import projector
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
+from data_loader import load_data
 
 flags = tf.app.flags
 FLAGS = flags.FLAGS
-flags.DEFINE_integer("embedding_size", 96, "Size of word embedding layer.")
-flags.DEFINE_float("learning_rate", 1.0, "Initial learning rate.")
-flags.DEFINE_integer("batch_size", 5, "Batch size.")
+flags.DEFINE_integer("embedding_size", 196, "Size of word embedding layer.")
+flags.DEFINE_float("learning_rate", 0.2, "Initial learning rate.")
+flags.DEFINE_integer("batch_size", 50, "Batch size.")
 flags.DEFINE_integer("n_epochs", 50, "Number of training epochs.")
 flags.DEFINE_boolean("clean", False, "Clean raw - eg if trying new preprocessing.")
 flags.DEFINE_boolean("load", True, "Load previous checkpoint?")
 flags.DEFINE_boolean("train", True, "Training model.")
-flags.DEFINE_boolean("inference", False, "Inference.")
-flags.DEFINE_boolean("visualize", True, "Visualize embeddings.")
+flags.DEFINE_boolean("inference", True, "Inference.")
+flags.DEFINE_boolean("vis", False, "Visualize embeddings.")
 
 # # Preprocessing 
-def sentence_clean(sentence,stem=False):
-    print("Cleaning")
-    clean_start = time.time()
-    review_text = BeautifulSoup(sentence,"html5lib").get_text()  
-    letters_only = re.sub("[^a-zA-Z]", " ", sentence) #Remove non-letters
-    words = letters_only.lower().split()    #Convert to lower case, split into individual words
-    if stem==True:
-        stemmer = PorterStemmer()
-        words_stemmed = list(map(stemmer.stem,words)) # expensive
-        df_analyse = pd.DataFrame({'before':words,'after':words_stemmed}) # see how stemming works
-        df_analyse.sample(200).to_csv("before_after_stem.csv")
-        words = words_stemmed[:]
-
-    stops = set(stopwords.words("english"))                  
-    meaningful_words = [w for w in words if not w in stops] #Remove stop words
-    clean_end = time.time()
-    time_taken = clean_end - clean_start
-    print("Finished cleaning. Took {0:.2f} seconds.".format(time_taken))
-    return( " ".join( meaningful_words )) #Join the words back into one string separated by space
-
 class Data_obj():
     def __init__(self,batch_size,clean_data):
         self.epoch = 1
@@ -109,31 +82,7 @@ class Data_obj():
                     self.total_examples_seen += self.batch_size
                 else:
                     self.k += 1
-
             self.epoch += 1
-
-# ### Load data: text8 wikipedia dump (http://mattmahoney.net/dc/textdata.html)
-def load_data(clean=False):
-    txt8_clean_path = "txt8_clean" #path to cleaned data
-    if not os.path.exists(txt8_clean_path) or FLAGS.clean == True:
-        print("Loading raw.")
-        path = os.path.expanduser("~") + "/gensim-data/text8/text8.gz"
-        if not os.path.exists(path):
-            api.load('text8')
-            with open(path) as f:
-                f = gzip.open(path, 'rb')
-                txt8_data = f.read()
-                f.close()
-                print("Length of dataset in words = {0}.".format(len(txt8_data)))
-            txt8_data_clean = [sentence_clean(txt8_data)] # Clean - takes a while
-            with open(txt8_clean_path,"wb") as fp:
-                pickle.dump(txt8_data_clean,fp)
-    else:
-        print("{0} found!".format(txt8_clean_path))
-        with open(txt8_clean_path,"rb") as fp:
-            txt8_data_clean = pickle.load(fp)
-    print("Length of (cleaned) dataset in words = {0}.".format(len(txt8_data_clean[0])))
-    return txt8_data_clean
 
 def makedirs(model_dir):
     dirs = ['models','vis']
@@ -219,6 +168,7 @@ class Model():
             batch_generater = self.data_obj.generator()
             print("Training")
             step = 0
+            epoch = self.data_obj.epoch
             while True:
                 data = next(batch_generater)
                 feed_dict = {self.train_inputs: data[:,0],self.train_context:data[:,[1]],self.learning_rate:self.lr}
@@ -235,10 +185,14 @@ class Model():
                         self.lr))
                     cur_losses = []
 
-                if self.data_obj.total_examples_seen % 1000000 == 0:
-                    self.lr/= 1.03
+                if self.data_obj.total_examples_seen % 1000000 == 0 and self.data_obj.total_examples_seen > 0:
+
                     self.saver.save(sess,self.model_path)
                     print("Saved in {0}.".format(self.model_path))
+
+                if epoch != self.data_obj.epoch:
+                    self.lr/= 1.03
+                    epoch += 1
 
                 if self.data_obj.epoch == self.n_epochs:
                     print("Finished.")
@@ -282,7 +236,7 @@ class Model():
             reduced_embeddings = tsne.fit_transform(learnt_embeddings[1:n_words_display+1]) #first embedding is meaningless (cant index it)
             labels = [self.data_obj.inverse_tokenizer(word_no) for word_no in range(1,self.vocabulary_size)[:n_words_display]]
 
-            plt.figure(figsize=(25,25))
+            fig = plt.figure(figsize=(25,25))
             plt.subplots_adjust(bottom = 0.1)
             plt.scatter(
                 reduced_embeddings[:, 0], reduced_embeddings[:, 1], marker='o',
@@ -299,12 +253,12 @@ class Model():
             save_path = folder + "visualization_perplex_{0}.png".format(perplexity)
             plt.savefig(save_path)
             print("Saved {0}.".format(save_path))
-            plt.close()
+            plt.close(fig)
 
 #### Data object initiazation
 if __name__ == "__main__":
     model_dir = "models/model_{0}/".format(FLAGS.embedding_size)
-    txt8_data_clean = load_data()
+    txt8_data_clean = load_data(FLAGS.clean)
     makedirs(model_dir)
     data_obj = Data_obj(batch_size=FLAGS.batch_size,clean_data=txt8_data_clean)
     model_obj = Model(
