@@ -30,7 +30,7 @@ flags.DEFINE_float("learning_rate", 0.5, "Initial learning rate.")
 flags.DEFINE_integer("batch_size", 8, "Batch size.")
 flags.DEFINE_integer("n_epochs", 200, "Number of training epochs.")
 flags.DEFINE_boolean("clean", True, "Clean raw - eg if trying new preprocessing.")
-flags.DEFINE_integer("first_n", 2000, "Clean raw - use first_n number of words (smaller dataset).")
+flags.DEFINE_integer("first_n", 100000, "Clean raw - use first_n number of words (smaller dataset).")
 flags.DEFINE_boolean("load", True, "Load previous checkpoint?")
 flags.DEFINE_boolean("train", True, "Training model.")
 flags.DEFINE_boolean("inference", True, "Inference.")
@@ -255,7 +255,7 @@ class Model():
 
 #### Data object initiazation
 if __name__ == "__main__":
-    model_dir = "models/model_{0}/".format(FLAGS.embedding_size)
+    model_dir = "models/model_{0}_words{1}_lr{2:.3f}_bs{3}/".format(FLAGS.embedding_size,FLAGS.first_n,FLAGS.learning_rate,FLAGS.batch_size)
     txt8_data_clean = load_data(FLAGS.clean,FLAGS.first_n)
     makedirs(model_dir)
     data_obj = Data_obj(batch_size=FLAGS.batch_size,clean_data=txt8_data_clean)
