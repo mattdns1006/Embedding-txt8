@@ -25,11 +25,12 @@ from data_loader import load_data
 
 flags = tf.app.flags
 FLAGS = flags.FLAGS
-flags.DEFINE_integer("embedding_size", 196, "Size of word embedding layer.")
-flags.DEFINE_float("learning_rate", 0.2, "Initial learning rate.")
-flags.DEFINE_integer("batch_size", 50, "Batch size.")
-flags.DEFINE_integer("n_epochs", 50, "Number of training epochs.")
-flags.DEFINE_boolean("clean", False, "Clean raw - eg if trying new preprocessing.")
+flags.DEFINE_integer("embedding_size", 32, "Size of word embedding layer.")
+flags.DEFINE_float("learning_rate", 0.5, "Initial learning rate.")
+flags.DEFINE_integer("batch_size", 8, "Batch size.")
+flags.DEFINE_integer("n_epochs", 200, "Number of training epochs.")
+flags.DEFINE_boolean("clean", True, "Clean raw - eg if trying new preprocessing.")
+flags.DEFINE_integer("first_n", 2000, "Clean raw - use first_n number of words (smaller dataset).")
 flags.DEFINE_boolean("load", True, "Load previous checkpoint?")
 flags.DEFINE_boolean("train", True, "Training model.")
 flags.DEFINE_boolean("inference", True, "Inference.")
@@ -190,11 +191,8 @@ class Model():
                     self.saver.save(sess,self.model_path)
                     print("Saved in {0}.".format(self.model_path))
 
-                if epoch != self.data_obj.epoch:
-                    self.lr/= 1.03
-                    epoch += 1
-
                 if self.data_obj.epoch == self.n_epochs:
+                    self.saver.save(sess,self.model_path)
                     print("Finished.")
                     break
 
@@ -258,7 +256,7 @@ class Model():
 #### Data object initiazation
 if __name__ == "__main__":
     model_dir = "models/model_{0}/".format(FLAGS.embedding_size)
-    txt8_data_clean = load_data(FLAGS.clean)
+    txt8_data_clean = load_data(FLAGS.clean,FLAGS.first_n)
     makedirs(model_dir)
     data_obj = Data_obj(batch_size=FLAGS.batch_size,clean_data=txt8_data_clean)
     model_obj = Model(
