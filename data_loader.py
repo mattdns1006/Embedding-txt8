@@ -16,7 +16,7 @@ from bs4 import BeautifulSoup
 def sentence_clean(sentence,first_n=None,stem=False):
     print("Cleaning")
     clean_start = time.time()
-    review_text = BeautifulSoup(sentence,"html5lib").get_text()  
+    sentence = BeautifulSoup(sentence,"html5lib").get_text()  
     letters_only = re.sub("[^a-zA-Z]", " ", sentence) #Remove non-letters
     words = letters_only.lower().split()    #Convert to lower case, split into individual words
     if stem==True:
@@ -24,14 +24,12 @@ def sentence_clean(sentence,first_n=None,stem=False):
         words_stemmed = list(map(stemmer.stem,words)) # expensive
         df_analyse = pd.DataFrame({'before':words,'after':words_stemmed}) # see how stemming works
         df_analyse.sample(200).to_csv("before_after_stem.csv")
-        words = words_stemmed[:]
-
     words = words[:] if first_n==None else words[:first_n]
     stops = set(stopwords.words("english"))                  
     meaningful_words = [w for w in words if not w in stops] #Remove stop words
     clean_end = time.time()
     time_taken = clean_end - clean_start
-    print("Finished cleaning. Took {0:.2f} seconds.".format(time_taken))
+    print("Finished cleaning. Took {0:.2f} seconds. Number of words before/after stop word removal = {1}/{2}.".format(time_taken,len(words),len(meaningful_words)))
     return( " ".join( meaningful_words )) #Join the words back into one string separated by space
 
 # ### Load data: text8 wikipedia dump (http://mattmahoney.net/dc/textdata.html)

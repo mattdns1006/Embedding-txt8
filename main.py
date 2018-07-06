@@ -213,12 +213,12 @@ class Model():
                 print("\n")
             if examples == True:
                 [return_closest_words(word) for word in ["one","nine","american","words","state"]]
-            while True:
-                word = input("Enter word == >")
-                try:
-                    return_closest_words(word)
-                except KeyError:
-                    print("Not a valid word. Try again.")
+            #while True:
+            #    word = input("Enter word == >")
+            #    try:
+            #        return_closest_words(word)
+            #    except KeyError:
+            #        print("Not a valid word. Try again.")
 
     def visualize(self): 
         tf.reset_default_graph()
@@ -228,7 +228,7 @@ class Model():
             self.saver.restore(sess,self.model_path)
             learnt_embeddings = self.embeddings.eval()
 
-        for perplexity in range(5,20,2):
+        for perplexity in range(5,15,2):
             n_words_display = 80 # look at first n_words_display embedded
             tsne = TSNE(n_components=2,perplexity=perplexity)
             reduced_embeddings = tsne.fit_transform(learnt_embeddings[1:n_words_display+1]) #first embedding is meaningless (cant index it)
@@ -248,7 +248,7 @@ class Model():
                     bbox=dict(boxstyle='round,pad=0.5', fc='yellow', alpha=0.5),
                     arrowprops=dict(arrowstyle = '->', connectionstyle='arc3,rad=0'))
 
-            save_path = folder + "visualization_perplex_{0}.png".format(perplexity)
+            save_path = self.model_dir + "visualization_perplex_{0}.png".format(perplexity)
             plt.savefig(save_path)
             print("Saved {0}.".format(save_path))
             plt.close(fig)
@@ -269,5 +269,5 @@ if __name__ == "__main__":
         model_obj.train(load=FLAGS.load)
     if FLAGS.inference== True:
         model_obj.inference()
-    if FLAGS.visualize== True:
+    if FLAGS.vis== True:
         model_obj.visualize()
