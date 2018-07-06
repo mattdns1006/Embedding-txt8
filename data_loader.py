@@ -13,18 +13,19 @@ from nltk.stem.porter import *
 #from nltk.stem import WordNetLemmatizer as WNL # to try
 from bs4 import BeautifulSoup
 
-def sentence_clean(sentence,first_n=None,stem=False):
+def sentence_clean(sentence,model_dir,first_n=None,stem=False):
     print("Cleaning")
     clean_start = time.time()
     sentence = BeautifulSoup(sentence,"html5lib").get_text()  
     letters_only = re.sub("[^a-zA-Z]", " ", sentence) #Remove non-letters
     words = letters_only.lower().split()    #Convert to lower case, split into individual words
+    words = words[:] if first_n==None else words[:first_n]
     if stem==True:
+        print("Stemming")
         stemmer = PorterStemmer()
         words_stemmed = list(map(stemmer.stem,words)) # expensive
         df_analyse = pd.DataFrame({'before':words,'after':words_stemmed}) # see how stemming works
-        df_analyse.sample(200).to_csv("before_after_stem.csv")
-    words = words[:] if first_n==None else words[:first_n]
+        df_analyse.sample(200).to_csv(model_dir+"before_after_stem.csv")
     stops = set(stopwords.words("english"))                  
     meaningful_words = [w for w in words if not w in stops] #Remove stop words
     clean_end = time.time()
@@ -33,7 +34,7 @@ def sentence_clean(sentence,first_n=None,stem=False):
     return( " ".join( meaningful_words )) #Join the words back into one string separated by space
 
 # ### Load data: text8 wikipedia dump (http://mattmahoney.net/dc/textdata.html)
-def load_data(clean=False,first_n=None):
+def load_data(clean,model_dir,first_n,stem):
     txt8_clean_path = 'txt8_clean'
     if not os.path.exists(txt8_clean_path) or clean == True:
         print("Loading raw.")
@@ -44,7 +45,7 @@ def load_data(clean=False,first_n=None):
             f = gzip.open(path, 'rb')
             txt8_data = f.read()
             f.close()
-        txt8_data_clean = [sentence_clean(txt8_data,first_n)] # Clean - takes a while
+        txt8_data_clean = [sentence_clean(txt8_data,model_dir,first_n,stem)] # Clean - takes a while
         with open(txt8_clean_path,"wb") as fp:
             pickle.dump(txt8_data_clean,fp)
     else:
